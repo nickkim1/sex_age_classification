@@ -22,8 +22,6 @@ import data_preprocessing as p
 
 ### COMMANDS FOR IMPLEMENTATION ### 
 
-### 
-
 # first set the device used
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("===================================")

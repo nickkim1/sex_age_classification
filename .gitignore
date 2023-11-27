@@ -1,2 +1,2 @@
 /bassetenv
-/__pycache__
+*.pyc

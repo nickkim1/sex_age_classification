@@ -196,6 +196,7 @@ def train_model():
             optimizer.zero_grad() # zero accumulated gradients 
             loss.backward() # backprop
             optimizer.step() # step on params 
+            
             # print message for every batch 
             if (i+1) % n_batches == 0: # -- this is where the i term above is used in for loop
                 print (f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{int(n_total_steps)}], Batch Loss: {loss.item():.4f}')
