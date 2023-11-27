@@ -7,7 +7,7 @@ import pandas as pd
 
 
 # ---------------------------------------------- # 
-filepath = 'exp.csv'
+filepath = 'exp_toy.csv'
 xy = np.loadtxt(filepath, delimiter=",", dtype='str')
 averaged_xy = np.loadtxt(filepath, delimiter=",", dtype='str')
 print(np.shape(xy)) # (13894, 5)

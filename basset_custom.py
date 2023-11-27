@@ -16,11 +16,15 @@ import argparse as ap
 import data_preprocessing as p
 
 ### NOTE ### 
-# 1. this is not the full implementation of the Basset architecture
-# 2. no need to preprocess because this is just bulk data, not single cell (can just use raw counts)
+# -  this is not the full implementation of the Basset architecture
+# - no need to preprocess because this is just bulk data, not single cell (can just use raw counts)
 
 ### COMMANDS FOR IMPLEMENTATION ### 
 ###################################
+
+# TODO: 
+# - incorporate in the control data and predict with that? should have two outputs in the model: one for control, one for experimental
+# - see where the loss curves are messing up 
 
 # first set the device used
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -108,9 +112,9 @@ class BassetCNN(nn.Module):
         self.pool_three = nn.MaxPool1d(4)
         self.fc1 = nn.Linear(2000, 1000) # 1000 unit linear layer (same as paper)
         self.dropout_one = nn.Dropout1d(0.3) # for some reason the 1D dropout doesn't work  
-        self.fc2 = nn.Linear(1000, 1000) # unsure of specific rationale why they kept the layer the same size, guess it was just optimal? 
+        self.fc2 = nn.Linear(1000, 164) # unsure of specific rationale why they kept the layer the same size, guess it was just optimal? 
         self.dropout_two = nn.Dropout1d(0.3)
-        self.fc3 = nn.Linear(1000, 164) # output dim should be [1x164] since i unsqueezed @ flattening above
+        self.fc3 = nn.Linear(164, 1) # output dim should be [1x164] since i unsqueezed @ flattening above
     def forward(self, x): 
         x = self.conv_one(x)
         # print('first conv layer: ', x.shape)
@@ -150,26 +154,27 @@ class BassetCNN(nn.Module):
         # print('second dropout layer: ', x.shape)
         x = self.fc3(x)
         # print('final fc layer: ', x.shape)
-        x = F.sigmoid(x)
+        x = F.sigmoid(torch.tensor(torch.flatten(x), dtype=torch.float64, requires_grad=True))
         # print('output sigmoid layer: ', x.shape)
         return x
 
-### initialize and send the model to the device above ### 
+# initialize and send the model to the device above
 model = BassetCNN().to(device)
 
-### define hyperparameters as described in the paper ###
+# define hyperparameters as described in the paper
 learning_rate = 0.001 # my own arbitrary choice for the lr 
 criterion = nn.BCELoss() # this is taken from the paper 
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
-### define some other parameters up here for use downstream in training/testing ### 
-num_epochs = 50
-n_batches = 6 # re-defined here purely for the purpose of training
+# define some other parameters up here for use downstream in training/testing
+num_epochs = 10
+n_batches = len(train_dataloader)
+# re-defined here purely for the purpose of training
 
-### train the model ### 
-### i didn't include any measures of accuracy of anything here -- just loss -- because i didn't know what the ground truth data should really look like? ### 
+# train the model: 
+# i didn't include any measures of accuracy of anything here -- just loss -- because i didn't know what the ground truth data should really look like? 
 def train_model():
-    ### initialize the weights. unsure if they did random initialization however ### 
+    # initialize the weights. unsure if they did random initialization however 
     def init_weights(m):
         if isinstance(m, nn.Linear) or isinstance(m, nn.Conv1d):
             torch.nn.init.xavier_uniform_(m.weight)
@@ -178,12 +183,13 @@ def train_model():
  
     train_log = {'training_loss_per_epoch':[]} # keep track of params 
 
-    for epoch in range(num_epochs):
+    for epoch in range(num_epochs):  
         # switch the model to training mode 
         model.train() 
         t_loss_per_batch = []
         for i, (samples, labels) in enumerate(train_dataloader): 
-            samples = samples.permute(1, 0) # tranpose the sample so that it is (4x600)
+            
+            samples = torch.reshape(samples, (samples.shape[0]*samples.shape[1], samples.shape[2])).permute(1, 0) # tranpose the sample so that it is (4x600)
             samples = samples.to(device) # send the samples to the device
 
             labels = labels[0] # assume that the first row is just the labels (i'm not sure how the real input data will be formatted, but this definitely isn't a great assumption)
@@ -196,7 +202,7 @@ def train_model():
             optimizer.zero_grad() # zero accumulated gradients 
             loss.backward() # backprop
             optimizer.step() # step on params 
-            
+
             # print message for every batch 
             if (i+1) % n_batches == 0: # -- this is where the i term above is used in for loop
                 print (f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{int(n_total_steps)}], Batch Loss: {loss.item():.4f}')
@@ -207,36 +213,31 @@ def train_model():
 
     # save the model's params after fully training it 
     PATH = './basset_params.pth'
-    torch.save(model.state_dict(), PATH) # -- save the model's params 
+    torch.save(model.state_dict(), PATH)
 
     return train_log # return the log of loss values 
 
-### test the model; load in saved params from specified PATH ### 
+# test the model; load in saved params from specified PATH
 def test_model(PATH):
-    # load in the state dict from the passed in path 
     model.load_state_dict(torch.load(PATH)) 
-    model.eval() # switch to eval mode to switch off layers like dropout 
+    model.eval() # switch to eval mode to switch off layers like dropout
 
-    ### initialize log dictionary for keeping track of training loss, accuracy, etc.. ### 
     test_log = {'testing_loss_per_epoch':[]}
     
     with torch.no_grad():
         for epoch in range(num_epochs):
             testing_loss_per_batch = []
             for i, (samples, labels) in enumerate(test_dataloader):
-                # set testing samples 
-                samples = samples.permute(1, 0)
+                
+                samples = torch.reshape(samples, (samples.shape[0]*samples.shape[1], samples.shape[2])).permute(1, 0)
                 samples = samples.to(device)
-                # set testing labels 
                 labels = labels[0]
                 labels = labels.to(device)
-                # send the model to the device
                 model.to(device)
                 predicted = model(samples)
-                # calculate the loss 
                 loss = criterion(predicted, labels)
                 testing_loss_per_batch.append(loss.item())
-            # calculate the average test loss 
+
             test_loss = sum(testing_loss_per_batch) / len(testing_loss_per_batch)
             test_log['testing_loss_per_epoch'].append(test_loss)
     return test_log
@@ -245,8 +246,7 @@ def test_model(PATH):
 train_log = train_model()
 test_log = test_model('./basset_params.pth')
 
-### quick function to get a visual of the loss ###
-### of note: strange results for testing loss -- constant -- but i still have to debug and see what the specific issue is ### 
+# quick function to get a visual of the loss
 def plot_loss(num_epochs, train_loss, test_loss):
     f, a = plt.subplots(figsize=(10,7.5), layout='constrained') # don't need to specify 2x2 or anything here, bc i'm just going to plot the loss 
     f.suptitle('Calculated Loss')
@@ -256,7 +256,7 @@ def plot_loss(num_epochs, train_loss, test_loss):
     a.set_ylabel('Average Loss')
     a.set_title(f'Training and Testing Loss')
     a.legend()
-    plt.show() # just show it - i guess i'll save it later once i have a more functional model running 
+    plt.show() 
  
 # call the loss function plotter 
 plot_loss(np.linspace(1, num_epochs, num=num_epochs).astype(int), train_log['training_loss_per_epoch'], test_log['testing_loss_per_epoch'])
